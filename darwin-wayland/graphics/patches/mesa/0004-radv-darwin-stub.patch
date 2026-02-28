@@ -1,0 +1,62 @@
+From: LunaOS Project <lunaos@puredarwin.org>
+Date: 2026-02-28
+Subject: [PATCH 4/5] radv: Darwin stub — AMD Vulkan for future amdgpu KEXT
+
+Mirror of the anv stub but for radv (AMD Vulkan driver).
+Probes for "amdgpu" DRM driver name at VkCreateInstance time.
+Falls back to lavapipe gracefully if amdgpu KEXT not present.
+
+TODO_amdgpu_KEXT: Port the Linux amdgpu DRM driver as an x86_64 Darwin KEXT.
+  Reference: https://github.com/torvalds/linux/tree/master/drivers/gpu/drm/amd
+  PureDarwin reference: FreeBSD drm-kmod (https://github.com/freebsd/drm-kmod)
+  which has already done a significant portion of this porting work for BSD.
+---
+diff --git a/src/amd/vulkan/radv_device.c b/src/amd/vulkan/radv_device.c
+--- a/src/amd/vulkan/radv_device.c
++++ b/src/amd/vulkan/radv_device.c
+@@ -1,5 +1,38 @@
+ #include "radv_private.h"
+ 
++#ifdef MESA_DARWIN
++/*
++ * Darwin radv stub.
++ * Same pattern as anv stub — probe for amdgpu at runtime.
++ *
++ * When the amdgpu KEXT is ready:
++ *   1. Build Mesa with -Dvulkan-drivers=...,amd
++ *   2. Rename radv_icd.x86_64.json.disabled → radv_icd.x86_64.json
++ *   3. radv will be discovered by the Vulkan loader automatically
++ *
++ * FreeBSD's drm-kmod provides a head start for porting amdgpu to BSD-like
++ * kernels. Darwin/XNU's IOKit differs significantly from FreeBSD's KLD,
++ * but the DRM ioctl interface (which IODRMShim already implements) is the
++ * same, so the userspace Mesa/radv code needs zero changes once the KEXT
++ * exposes /dev/dri/card0 as an amdgpu device.
++ */
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include "drm_darwin.h"
++
++static bool darwin_has_amdgpu(void) {
++    int fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
++    if (fd < 0) return false;
++    char name_buf[64] = {};
++    struct drm_version ver = {
++        .name = name_buf, .name_len = sizeof(name_buf) - 1,
++    };
++    bool ok = (ioctl(fd, DRM_IOCTL_VERSION, &ver) == 0 &&
++               strncmp(name_buf, "amdgpu", 6) == 0);
++    close(fd);
++    return ok;
++}
++
++VkResult radv_darwin_check_device(void) {
++    if (!darwin_has_amdgpu()) {
++        mesa_loge("radv: AMD amdgpu GPU not found. "
++                  "TODO_amdgpu_KEXT: port amdgpu as a Darwin KEXT to enable "
++                  "hardware AMD Vulkan. Falling back to lavapipe.");
++        return VK_ERROR_INCOMPATIBLE_DRIVER;
++    }
++    return VK_SUCCESS;
++}
++#endif /* MESA_DARWIN */

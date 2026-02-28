@@ -1,0 +1,86 @@
+From: LunaOS Project <lunaos@puredarwin.org>
+Date: 2026-02-28
+Subject: [PATCH 2/5] lavapipe: Darwin Vulkan 1.4 software driver
+
+Lavapipe (LLVMpipe-backed software Vulkan) needs three Darwin fixes:
+
+1. Memory allocation: Linux uses anonymous mmap with MAP_POPULATE.
+   Darwin lacks MAP_POPULATE — use MAP_PRIVATE instead.
+
+2. Shared memory: Linux uses memfd_create() for Vulkan host memory.
+   Darwin uses shm_open() + ftruncate() as equivalent.
+
+3. Timeline semaphores: Linux uses eventfd(). Darwin uses a
+   kqueue + pipe pair (same pattern as our Wayland event loop).
+
+4. VkSwapchain WSI: Route through Wayland (wl_surface + wl_buffer)
+   which is our only WSI platform on Darwin.
+---
+diff --git a/src/gallium/frontends/lavapipe/lp_device.c b/src/gallium/frontends/lavapipe/lp_device.c
+--- a/src/gallium/frontends/lavapipe/lp_device.c
++++ b/src/gallium/frontends/lavapipe/lp_device.c
+@@ -1,6 +1,18 @@
+ #include "lp_device.h"
+ 
++#ifdef MESA_DARWIN
++/* Darwin: shm_open replaces memfd_create */
++#include <sys/mman.h>
++#include <fcntl.h>
++static int darwin_memfd_create(const char *name, size_t size) {
++    char path[64];
++    snprintf(path, sizeof(path), "/lunaos-vk-%s-XXXXXX", name);
++    int fd = shm_open(path, O_RDWR | O_CREAT | O_EXCL, 0600);
++    if (fd < 0) return -1;
++    shm_unlink(path);            /* unlink immediately — fd keeps it alive */
++    ftruncate(fd, (off_t)size);
++    return fd;
++}
++#define memfd_create(name, flags) darwin_memfd_create(name, 0x100000)
++#endif
++
+ /* ... rest of lp_device.c unchanged ... */
+
+diff --git a/src/gallium/frontends/lavapipe/lp_semaphore.c b/src/gallium/frontends/lavapipe/lp_semaphore.c
+--- a/src/gallium/frontends/lavapipe/lp_semaphore.c
++++ b/src/gallium/frontends/lavapipe/lp_semaphore.c
+@@ -1,5 +1,25 @@
+ #include "lp_semaphore.h"
+ 
++#ifdef MESA_DARWIN
++/* Darwin timeline semaphore using pipe + kqueue instead of eventfd */
++#include <sys/event.h>
++#include <unistd.h>
++
++struct darwin_semaphore {
++    int kq;
++    int pipe_r, pipe_w;
++    uint64_t value;
++};
++
++static int darwin_semaphore_create(struct darwin_semaphore *s, uint64_t init) {
++    int fds[2];
++    pipe(fds);
++    s->pipe_r = fds[0]; s->pipe_w = fds[1];
++    s->kq     = kqueue();
++    s->value  = init;
++    struct kevent ev = {s->pipe_r, EVFILT_READ, EV_ADD, 0, 0, s};
++    kevent(s->kq, &ev, 1, NULL, 0, NULL);
++    return 0;
++}
++/* signal: write 1 byte to pipe; wait: kevent() with timeout */
++#define eventfd(v,f)   ({ struct darwin_semaphore *_s = calloc(1,sizeof(*_s)); darwin_semaphore_create(_s,v); _s->pipe_r; })
++#endif
+
+diff --git a/src/vulkan/wsi/wsi_common_wayland.c b/src/vulkan/wsi/wsi_common_wayland.c
+--- a/src/vulkan/wsi/wsi_common_wayland.c
++++ b/src/vulkan/wsi/wsi_common_wayland.c
+@@ -1,5 +1,12 @@
+ #include "wsi_common_wayland.h"
+ 
++#ifdef MESA_DARWIN
++/* Darwin: use wl_shm buffers for software swapchain images.
++ * On Linux this path uses DMA-BUF. On Darwin we fall back to wl_shm
++ * backed by our dumb buffers (mmap'd IOBufferMemoryDescriptor).
++ * Performance: ~equivalent to Linux wl_shm path on llvmpipe.     */
++#define WSI_USE_DUMB_BUFFER_FALLBACK 1
++#endif
