@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  org.puredarwin.seatd.plist
+  Launches seatd-darwin at boot as root, before any user sessions.
+  Install: cp this file to /Library/LaunchDaemons/
+           launchctl load /Library/LaunchDaemons/org.puredarwin.seatd.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>             <string>org.puredarwin.seatd</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/sbin/seatd-darwin</string>
+        <string>-g</string>
+        <string>video</string>
+    </array>
+    <key>RunAtLoad</key>         <true/>
+    <key>KeepAlive</key>         <true/>
+    <key>UserName</key>          <string>root</string>
+    <key>StandardOutPath</key>   <string>/var/log/seatd.log</string>
+    <key>StandardErrorPath</key> <string>/var/log/seatd.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>SEATD_LOGLEVEL</key><string>info</string>
+    </dict>
+</dict>
+</plist>

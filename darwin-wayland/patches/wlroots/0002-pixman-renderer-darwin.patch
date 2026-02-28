@@ -1,0 +1,45 @@
+From: LunaOS Project <lunaos@puredarwin.org>
+Date: 2026-02-28
+Subject: [PATCH 2/4] render: force pixman renderer on Darwin (no GPU accel yet)
+
+On Darwin with IODRMShim, we have dumb framebuffer access but no
+OpenGL/Vulkan (IOAcceleratorFamily is closed).  Force the pixman
+software renderer which only needs a mappable dumb buffer.
+
+The pixman renderer works by:
+  1. Compositor renders to a wlr_buffer (plain malloc'd memory)
+  2. pixman blits it to the dumb buffer via CPU
+  3. IODRMShim.kext copies dumb buffer to VRAM on SETCRTC
+
+Performance: sufficient for a desktop at 1080p/60hz on modern x86_64.
+LLVMpipe EGL can be added later as a drop-in upgrade.
+---
+diff --git a/render/meson.build b/render/meson.build
+--- a/render/meson.build
++++ b/render/meson.build
+@@ -1,5 +1,11 @@
++if host_machine.system() == 'darwin'
++  # Darwin: pixman only, no EGL/GLES/Vulkan until GPU driver available
++  conf_data.set('WLR_HAS_GLES2_RENDERER', false)
++  conf_data.set('WLR_HAS_VULKAN_RENDERER', false)
++  conf_data.set('WLR_HAS_PIXMAN_RENDERER', true)
++  subdir('pixman')
++else
+ subdir('gles2')
+ subdir('vulkan')
+ subdir('pixman')
++endif
+
+diff --git a/render/pixman/renderer.c b/render/pixman/renderer.c
+--- a/render/pixman/renderer.c
++++ b/render/pixman/renderer.c
+@@ -1,4 +1,12 @@
+ #include "pixman-renderer-internal.h"
++
++#ifdef __APPLE__
++/* Darwin: map the dumb buffer directly as our render target.
++ * wlr_pixman_renderer_get_buffer() returns the dumb buffer fd,
++ * which we mmap() here for pixman to draw into. */
++#include <sys/mman.h>
++#include "../../backend/drm/darwin/drm_darwin_session.h"
++#endif
