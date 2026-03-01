@@ -1,0 +1,70 @@
+From: LunaOS Project <lunaos@puredarwin.org>
+Date: 2026-02-28
+Subject: [PATCH 3/5] anv: Darwin stub — Intel Vulkan for future i915 KEXT
+
+anv (Intel Vulkan) requires the i915 DRM kernel driver to be present.
+On Darwin, i915 doesn't exist yet — it needs to be ported as a KEXT.
+
+This patch makes anv compile on Darwin but:
+  - Fails gracefully at vkCreateInstance if /dev/dri/renderD128 is not
+    an i915 device (detected via DRM_IOCTL_VERSION checking driver name)
+  - Logs a clear message: "anv: i915 KEXT not loaded — falling back to lavapipe"
+  - Returns VK_ERROR_INCOMPATIBLE_DRIVER so the loader tries the next ICD
+
+When the i915 KEXT is eventually ported:
+  1. Build Mesa with -Dvulkan-drivers=...,intel
+  2. Rename anv_icd.x86_64.json.disabled → anv_icd.x86_64.json
+  3. anv will be discovered automatically by the Vulkan loader
+
+TODO_i915_KEXT: Port the Linux i915 DRM driver as an x86_64 Darwin KEXT.
+  Reference: https://github.com/torvalds/linux/tree/master/drivers/gpu/drm/i915
+  PureDarwin issue: https://github.com/PureDarwin/PureDarwin/issues/TBD
+---
+diff --git a/src/intel/vulkan/anv_device.c b/src/intel/vulkan/anv_device.c
+--- a/src/intel/vulkan/anv_device.c
++++ b/src/intel/vulkan/anv_device.c
+@@ -1,5 +1,40 @@
+ #include "anv_private.h"
+ 
++#ifdef MESA_DARWIN
++/*
++ * Darwin anv stub.
++ *
++ * We probe for i915 by opening /dev/dri/renderD128 and checking the
++ * DRM driver name via DRM_IOCTL_VERSION. If it's not "i915", we bail
++ * with VK_ERROR_INCOMPATIBLE_DRIVER so lavapipe handles the request.
++ *
++ * This stub allows anv to be compiled into the Mesa build and included
++ * in the ICD manifest search path, without breaking systems that don't
++ * have an Intel GPU or the i915 KEXT.
++ */
++#include <fcntl.h>
++#include <sys/ioctl.h>
++#include "drm_darwin.h"   /* from our darwin-wayland headers */
++
++static bool darwin_has_i915(void) {
++    int fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
++    if (fd < 0) return false;
++
++    char name_buf[64] = {};
++    struct drm_version ver = {
++        .name     = name_buf,
++        .name_len = sizeof(name_buf) - 1,
++    };
++    bool ok = (ioctl(fd, DRM_IOCTL_VERSION, &ver) == 0 &&
++               strncmp(name_buf, "i915", 4) == 0);
++    close(fd);
++    return ok;
++}
++
++/* Called at VkCreateInstance time */
++VkResult anv_darwin_check_device(void) {
++    if (!darwin_has_i915()) {
++        mesa_loge("anv: Intel i915 GPU not found. "
++                  "TODO_i915_KEXT: port i915 as a Darwin KEXT to enable "
++                  "hardware Intel Vulkan. Falling back to lavapipe.");
++        return VK_ERROR_INCOMPATIBLE_DRIVER;
++    }
++    return VK_SUCCESS;
++}
++#endif /* MESA_DARWIN */

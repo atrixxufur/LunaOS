@@ -1,0 +1,97 @@
+From: LunaOS Project <lunaos@puredarwin.org>
+Date: 2026-02-28
+Subject: [PATCH 1/4] backend/drm: add Darwin/IODRMShim backend support
+
+wlroots' DRM backend assumes Linux kernel interfaces for device
+enumeration (udev), DRM authentication, and atomic modesetting.
+This patch adds a Darwin-specific path that:
+
+  1. Replaces udev enumeration with direct /dev/dri/ scanning
+  2. Replaces logind/seatd-systemd auth with our seatd-darwin protocol
+  3. Stubs out atomic modesetting (we use legacy KMS via IODRMShim)
+  4. Replaces Linux-specific epoll drm_event delivery with kqueue
+
+Applied to: wlroots 0.18.x
+---
+ backend/drm/drm.c          | darwin compat block
+ backend/drm/session.c      | replace udev with IOKit scan
+ meson.build                | Darwin platform detection
+---
+diff --git a/backend/drm/drm.c b/backend/drm/drm.c
+--- a/backend/drm/drm.c
++++ b/backend/drm/drm.c
+@@ -1,6 +1,14 @@
+ #include <wlr/backend/drm.h>
+ #include "drm-internal.h"
+ 
++/* ── Darwin compat ──────────────────────────────────────────────────────── */
++#ifdef __APPLE__
++#  include <sys/event.h>          /* kqueue replaces epoll for DRM events   */
++#  include "darwin/drm_darwin_session.h"
++#  define WLR_DRM_DARWIN 1
++/* udev_monitor replaced by IOKit notification port — see drm_darwin_session.c */
++#  undef  HAVE_LIBUDEV
++#endif
++/* ─────────────────────────────────────────────────────────────────────── */
++
+ static bool init_drm_resources(struct wlr_drm_backend *drm) {
+ 	drmModeRes *res = drmModeGetResources(drm->fd);
+ 	if (!res) {
+@@ -45,6 +53,17 @@ static bool init_drm_resources(struct wlr_drm_backend *drm) {
+ 
+ static int handle_drm_event(int fd, uint32_t mask, void *data) {
+ 	struct wlr_drm_backend *drm = data;
++
++#ifdef WLR_DRM_DARWIN
++	/* On Darwin, DRM events (page-flip completions) arrive via kqueue
++	 * EVFILT_READ on /dev/dri/card0. IODRMShim synthesises a standard
++	 * drm_event_vblank struct on the read fd so drmHandleEvent works. */
++	if (mask & WL_EVENT_READABLE) {
++		drmEventContext ctx = { .version = 3,
++		                        .page_flip_handler2 = drm->page_flip_handler };
++		drmHandleEvent(fd, &ctx);
++	}
++	return 1;
++#endif
++
+ 	drmEventContext ctx = { .version = 3,
+ 	                        .page_flip_handler2 = drm->page_flip_handler };
+ 	drmHandleEvent(fd, &ctx);
+diff --git a/backend/drm/session.c b/backend/drm/session.c
+--- a/backend/drm/session.c
++++ b/backend/drm/session.c
+@@ -1,5 +1,11 @@
++#ifndef __APPLE__
+ #include <libudev.h>
+ #include <systemd/sd-login.h>
++#else
++/* Darwin: no udev, no systemd. Device enumeration done by scanning /dev/dri/
++ * and /dev/input/ directly, which darwin-evdev-bridge and IODRMShim create. */
++#include "darwin/drm_darwin_session.h"
++#endif
+ 
+ struct wlr_session *wlr_session_create(struct wl_event_loop *loop) {
++#ifdef __APPLE__
++	return drm_darwin_session_create(loop);
++#else
+ 	return udev_session_create(loop);
++#endif
+ }
+diff --git a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -10,6 +10,14 @@ cc = meson.get_compiler('c')
+ 
++# Darwin / PureDarwin platform
++darwin = host_machine.system() == 'darwin'
++if darwin
++  add_project_arguments('-DWLR_DARWIN=1', language: ['c', 'cpp'])
++  add_project_arguments('-x86_64', language: ['c', 'cpp'])
++  # libdrm-darwin provides the same symbols as libdrm
++  drm = cc.find_library('drm', dirs: ['/usr/local/lib'], required: true)
++  have_udev = false
++  have_systemd = false
++  have_elogind = false
++endif
++
+ drm = dependency('libdrm', required: get_option('drm-backend'))

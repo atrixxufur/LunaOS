@@ -1,0 +1,8 @@
+# /etc/fstab — LunaOS filesystem mount table
+#
+# device            mountpoint      fstype   options              dump pass
+/dev/disk0s2        /               hfs      rw                   1    1
+/dev/disk0s1        /boot           msdos    ro                   0    0
+devfs               /dev            devfs    rw,nobrowse          0    0
+tmpfs               /run            tmpfs    rw,nosuid,size=64m   0    0
+tmpfs               /tmp            tmpfs    rw,nosuid,size=256m  0    0

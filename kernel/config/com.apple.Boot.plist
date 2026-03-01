@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.apple.Boot.plist — LunaOS EFI boot configuration
+
+  Installed to: /Library/Preferences/SystemConfiguration/com.apple.Boot.plist
+  on the EFI partition (ESP) or the root volume.
+
+  XNU reads this file very early in boot (before kextd, before launchd)
+  to determine kernel arguments and boot behavior.
+
+  Key boot-args for LunaOS:
+  ──────────────────────────
+  csr-active-config=0xFF
+    Disables all SIP restrictions. Required because:
+      - IODRMShim.kext is not Apple-signed
+      - We load third-party KEXTs for display and input
+      - PureDarwin has no secure enclave / T2 chip
+
+  kext-dev-mode=1
+    Allows KEXTs signed with a developer certificate (or self-signed)
+    to load without full Apple notarization.
+
+  -v (verbose)
+    Shows kernel boot log on the console framebuffer.
+    Critical for debugging early boot failures.
+    Remove this for a production "quiet boot" experience.
+
+  pmuflags=1
+    Disables power management restrictions that can cause kernel panics
+    on non-Apple hardware (e.g. QEMU, generic x86 PCs).
+
+  -no_compat_warning
+    Suppresses "KEXT version mismatch" console warnings from KEXTs
+    that were built against a slightly different SDK version.
+
+  io=0x3
+    Sets IOKit verbosity level. 0x3 = errors + warnings only.
+    Use 0xffffffff for maximum IOKit debug output.
+
+  nvram-boot-args (alternative):
+    These can also be set via: nvram boot-args="..."
+    on a running macOS/PureDarwin system.
+-->
+<plist version="1.0">
+<dict>
+    <key>Kernel</key>
+    <string>mach_kernel</string>
+
+    <key>Kernel Flags</key>
+    <string>csr-active-config=0xFF kext-dev-mode=1 -v pmuflags=1 -no_compat_warning io=0x3</string>
+
+    <!--
+      Timeout: seconds before auto-booting the default entry.
+      Set to 0 for instant boot, -1 to always wait for user input.
+    -->
+    <key>Timeout</key>
+    <string>3</string>
+
+    <!--
+      Graphics mode for the boot console framebuffer.
+      Format: WxHxBPP (e.g. 1920x1080x32)
+      This is the mode used for -v verbose boot output and for
+      IODRMShim to initialise the display before Wayland starts.
+    -->
+    <key>Graphics Mode</key>
+    <string>1920x1080x32</string>
+
+    <!--
+      Boot volume: the partition containing mach_kernel.
+      "hd(X,Y)" = BIOS disk X, partition Y (MBR)
+      On EFI systems, the bootloader handles this; leave as default.
+    -->
+    <key>Boot Volume</key>
+    <string>hd(0,2)</string>
+
+    <!--
+      LunaOS identification (shown in verbose boot header)
+    -->
+    <key>OSVersion</key>
+    <string>LunaOS 0.1.0 (Darwin 26)</string>
+
+    <!--
+      Hibernation mode: 0 = disable (safe for VM/non-Apple hardware)
+    -->
+    <key>Hibernate Mode</key>
+    <integer>0</integer>
+</dict>
+</plist>

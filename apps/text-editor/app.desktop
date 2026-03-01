@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Text Editor
+Exec=luna-editor %F
+Icon=text-editor
+Type=Application
+Categories=TextEditor;Utility;
+Comment=LunaOS Text Editor
+MimeType=text/plain;text/x-c;text/x-shellscript;

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Files
+Exec=luna-files
+Icon=file-manager
+Type=Application
+Categories=FileManager;
+Comment=LunaOS File Manager
