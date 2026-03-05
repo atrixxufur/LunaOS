@@ -79,9 +79,9 @@ darwin-wayland/
 ## Build Steps
 
 ```sh
-# 1. Clone darwin-wayland
-git clone https://github.com/PureDarwin/darwin-wayland
-cd darwin-wayland
+# 1. Clone LunaOS
+git clone https://github.com/atrixxufur/LunaOS
+cd LunaOS
 
 # 2. Configure
 cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local
